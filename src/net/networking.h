@@ -13,18 +13,18 @@
 class Networking : public Configurable {
  public:
   Networking(String config_path, String ssid, String password, String hostname);
-  void setup(std::function<void(bool)> connection_cb);
+  void setup(std::function<void(bool)> connection_cb, bool restartOnNetworkLoss = true);
   ObservableValue<String>* get_hostname();
   virtual JsonObject& get_configuration(JsonBuffer& buf) override final;
   virtual bool set_configuration(const JsonObject& config) override final;
   virtual String get_config_schema() override;
-
+  void set_offline(bool offline) { this->offline = offline; }
   void reset_settings();
 
  protected:
   void check_connection();
-  void setup_saved_ssid(std::function<void(bool)> connection_cb);
-  void setup_wifi_manager(std::function<void(bool)> connection_cb);
+  void setup_saved_ssid();
+  void setup_wifi_manager();
 
  private:
   AsyncWebServer* server;
@@ -38,6 +38,11 @@ class Networking : public Configurable {
   String preset_ssid = "";
   String preset_password = "";
   String preset_hostname = "";
+  bool restart_on_disconnection = true;
+  std::function<void(bool)> connection_callback;
+  bool offline = false;
 };
+
+static Networking* networking = NULL;
 
 #endif

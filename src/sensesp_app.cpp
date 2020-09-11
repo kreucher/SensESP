@@ -27,7 +27,8 @@ SensESPApp::SensESPApp(String preset_hostname, String ssid,
                        String wifi_password, String sk_server_address,
                        uint16_t sk_server_port, StandardSensors sensors,
                        int led_pin, bool enable_led, int led_ws_connected,
-                       int led_wifi_connected, int led_offline) {
+                       int led_wifi_connected, int led_offline,
+                       bool restart_on_wifi_loss) {
   // initialize filesystem
 #ifdef ESP8266
   if (!SPIFFS.begin()) {

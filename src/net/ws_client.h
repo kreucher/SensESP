@@ -11,7 +11,7 @@
 
 static const char* NULL_AUTH_TOKEN = "";
 
-enum ConnectionState { disconnected, authorizing, connecting, connected };
+enum ConnectionState { disconnected, authorizing, connecting, connected, offline };
 
 class WSClient : public Configurable {
  public:
@@ -24,6 +24,7 @@ class WSClient : public Configurable {
   void on_connected(uint8_t* payload);
   void on_receive_delta(uint8_t* payload);
   void connect();
+  void takeOffline();
   void loop();
   bool is_connected();
   void restart();
@@ -45,6 +46,7 @@ class WSClient : public Configurable {
   String polling_href = "";
   String auth_token = NULL_AUTH_TOKEN;
   bool server_detected = false;
+  bool token_test_success = false;
   
   // FIXME: replace with a single connection_state enum
   ConnectionState connection_state = disconnected;
@@ -62,4 +64,5 @@ class WSClient : public Configurable {
   bool get_mdns_service(String& server_address, uint16_t& server_port);
 };
 
+static WSClient* ws_client = NULL;
 #endif

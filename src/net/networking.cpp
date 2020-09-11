@@ -35,28 +35,47 @@ Networking::Networking(String config_path, String ssid,
   server = new AsyncWebServer(80);
   dns = new DNSServer();
   wifi_manager = new AsyncWiFiManager(server, dns);
+
+  //set singleton object
+  networking = this;
 }
 
 void Networking::check_connection() {
-  if (WiFi.status() != WL_CONNECTED) {
-    // if connection is lost, simply restart
-    debugD("Wifi disconnected: restarting...");
-    ESP.restart();
-  }
+    if (!offline && WiFi.status() != WL_CONNECTED) {
+      // if connection is lost, simply restart
+        debugD("Wifi disconnected: restarting...");
+        if(restart_on_disconnection)
+        {
+          ESP.restart();
+        }
+        else
+        {
+          auto wifiStatus = WiFi.status();
+          debugD("WiFi status: %d", wifiStatus);
+          if(wifiStatus == WS_DISCONNECT)
+          {
+            setup_saved_ssid();
+          }
+        }
+    }
 }
 
-void Networking::setup(std::function<void(bool)> connection_cb) {
+void Networking::setup(std::function<void(bool)> connection_cb, bool restartOnNetworkLoss) {
+  restart_on_disconnection = restartOnNetworkLoss;
+  connection_callback = connection_cb;
+
   if (ap_ssid != "" && ap_password != "") {
-    setup_saved_ssid(connection_cb);
+    setup_saved_ssid();
   }
   if (ap_ssid == "" && WiFi.status() != WL_CONNECTED) {
-    setup_wifi_manager(connection_cb);
+    setup_wifi_manager();
   }
   app.onRepeat(1000, std::bind(&Networking::check_connection, this));
 }
 
-void Networking::setup_saved_ssid(std::function<void(bool)> connection_cb) {
-  WiFi.begin(ap_ssid.c_str(), ap_password.c_str());
+void Networking::setup_saved_ssid() {
+  auto status = WiFi.begin(ap_ssid.c_str(), ap_password.c_str());
+  debugI("WiFi begin=%d", status);
 
   uint32_t timer_start = millis();
 
@@ -66,7 +85,7 @@ void Networking::setup_saved_ssid(std::function<void(bool)> connection_cb) {
          (millis() - timer_start) < 3 * 60 * 1000) {
     delay(500);
     if (printCounter % 4) {
-      debugI("Wifi status=%d, time=%d ms", WiFi.status(), 500 * printCounter);
+      debugI("Wifi status=%d, time=%d ms", WiFi.status(), millis() - timer_start);
     }
     printCounter++;
   }
@@ -75,12 +94,12 @@ void Networking::setup_saved_ssid(std::function<void(bool)> connection_cb) {
     debugI("Connected to wifi, SSID: %s (signal: %d)", WiFi.SSID().c_str(),
            WiFi.RSSI());
     debugI("IP address of Device: %s",  WiFi.localIP().toString().c_str());
-    connection_cb(true);
+    connection_callback(true);
     WiFi.mode(WIFI_STA);
   }
 }
 
-void Networking::setup_wifi_manager(std::function<void(bool)> connection_cb) {
+void Networking::setup_wifi_manager() {
   should_save_config = false;
 
   // set config save notify callback
@@ -108,7 +127,7 @@ void Networking::setup_wifi_manager(std::function<void(bool)> connection_cb) {
 
   debugI("Connected to wifi,");
   debugI("IP address of Device: %s", WiFi.localIP().toString().c_str());
-  connection_cb(true);
+  connection_callback(true);
 
   if (should_save_config) {
     String new_hostname = custom_hostname.getValue();

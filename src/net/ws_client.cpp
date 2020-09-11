@@ -17,7 +17,9 @@
 #include "sensesp_app.h"
 #include "signalk/signalk_listener.h"
 
-WSClient* ws_client;
+// Define this if you need SK communication on serial or remote debug
+//#define SIGNALK_PRINT_SND_DATA
+//#define SIGNALK_PRINT_RCV_DELTA
 
 void webSocketClientEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
@@ -40,8 +42,7 @@ void webSocketClientEvent(WStype_t type, uint8_t* payload, size_t length) {
 }
 
 WSClient::WSClient(String config_path, SKDelta* sk_delta, String server_address,
-                   uint16_t server_port,
-                   std::function<void(bool)> connected_cb,
+                   uint16_t server_port, std::function<void(bool)> connected_cb,
                    void_cb_func delta_cb)
     : Configurable{config_path} {
   this->sk_delta = sk_delta;
@@ -73,15 +74,21 @@ void WSClient::connect_loop() {
 }
 
 void WSClient::on_disconnected() {
-  if (this->connection_state == connecting && server_detected) {
+  if (this->connection_state == connecting && server_detected &&
+      !token_test_success) {
     // Going from connecting directly to disconnect when we
     // know we have found and talked to the server usually means
     // the authentication token is bad.
+    // JD: I've seen scenario when token has been deleted even
+    //      test_token got HTTP 200, just make sure we don't have
+    //      WiFi/network issues where connection fails in connecting phase
     debugW("Bad access token detected. Setting token to null.");
     auth_token = NULL_AUTH_TOKEN;
     save_configuration();
   }
-  this->connection_state = disconnected;
+  if (this->connection_state != offline) {
+    this->connection_state = disconnected;
+  }
   server_detected = false;
   this->connected_cb(false);
 }
@@ -125,7 +132,9 @@ void WSClient::subscribe_listeners() {
     String messageJson;
 
     subscription.printTo(messageJson);
-    debugI("Subscription JSON message:\n %s", messageJson.c_str());
+#if SIGNALK_PRINT_SND_DATA
+    debugD("Subscription JSON message:\n %s", messageJson.c_str());
+#endif
     this->client.sendTXT(messageJson);
   }
 }
@@ -180,47 +189,68 @@ bool WSClient::get_mdns_service(String& server_address, uint16_t& server_port) {
 }
 
 void WSClient::connect() {
+  if (connection_state == offline) {
+    // enable reconnection if state of offline
+    connection_state == disconnected;
+  }
+
   if (connection_state != disconnected) {
     return;
   }
-  debugD("Initiating connection");
 
   connection_state = authorizing;
 
   String server_address = this->server_address;
   uint16_t server_port = this->server_port;
 
-  if (this->server_address.isEmpty()) {
-    if (!get_mdns_service(server_address, server_port)) {
-      debugE("No SignalK server found in network when using mDNS service!");
-    } else {
-      debugI("SignalK server has been found at address %s:%d by mDNS.",
-             server_address.c_str(), server_port);
+  if (WiFi.isConnected()) {
+    debugD("Initiating connection");
+
+    if (this->server_address.isEmpty()) {
+      if (!get_mdns_service(server_address, server_port)) {
+        debugE("No SignalK server found in network when using mDNS service!");
+      } else {
+        debugI("SignalK server has been found at address %s:%d by mDNS.",
+               server_address.c_str(), server_port);
+      }
     }
-  }
 
-  if (!server_address.isEmpty() && server_port > 0) {
-    debugD("Websocket is connecting to SignalK server on address %s:%d",
-           server_address.c_str(), server_port);
+    if (!server_address.isEmpty() && server_port > 0) {
+      debugD("Websocket is connecting to SignalK server on address %s:%d",
+             server_address.c_str(), server_port);
+    } else {
+      // host and port not defined - wait for mDNS
+      connection_state = disconnected;
+      return;
+    }
+
+    if (this->polling_href != "") {
+      // existing pending request
+      this->poll_access_request(server_address, server_port,
+                                this->polling_href);
+      return;
+    }
+
+    if (this->auth_token == NULL_AUTH_TOKEN) {
+      // initiate HTTP authentication
+      debugD("No prior authorization token present.");
+      this->send_access_request(server_address, server_port);
+      return;
+    }
+
+    if (!token_test_success)  // test token once, if last attempt was success just connect WS
+                              // (after device sleep or ws connection loss)
+    {
+      this->test_token(server_address, server_port);
+    } else {
+      server_detected = true;
+      this->connect_ws(server_address, server_port);
+    }
   } else {
-    // host and port not defined - wait for mDNS
-    connection_state = disconnected;
-    return;
+    debugI(
+        "WiFi is disconnected. SignalK client connection will connect when "
+        "WiFi is connected.");
   }
-
-  if (this->polling_href != "") {
-    // existing pending request
-    this->poll_access_request(server_address, server_port, this->polling_href);
-    return;
-  }
-
-  if (this->auth_token == NULL_AUTH_TOKEN) {
-    // initiate HTTP authentication
-    debugD("No prior authorization token present.");
-    this->send_access_request(server_address, server_port);
-    return;
-  }
-  this->test_token(server_address, server_port);
 }
 
 void WSClient::test_token(const String server_address,
@@ -241,14 +271,17 @@ void WSClient::test_token(const String server_address,
     debugD("Testing resulted in http status %d", httpCode);
     if (payload.length() > 0) {
       debugD("Returned payload (length %d) is: ", payload.length());
+#ifdef SIGNALK_PRINT_SND_DATA
       debugD("%s", payload.c_str());
       debugD("End of payload output");
+#endif
     } else {
       debugD("Returned payload is empty");
     }
     if (httpCode == 200) {
       // our token is valid, go ahead and connect
       debugD("Attempting to connect to SignalK Websocket...");
+      token_test_success = true;
       server_detected = true;
       this->connect_ws(server_address, server_port);
     } else if (httpCode == 401) {
@@ -395,7 +428,8 @@ void WSClient::connect_ws(const String host, const uint16_t port) {
 }
 
 void WSClient::loop() {
-  if (this->connection_state == connecting || this->connection_state == connected) {
+  if (this->connection_state == connecting ||
+      this->connection_state == connected) {
     this->client.loop();
   }
 }
@@ -491,4 +525,12 @@ bool WSClient::set_configuration(const JsonObject& config) {
   this->polling_href = config["polling_href"].as<String>();
 
   return true;
+}
+
+void WSClient::takeOffline() {
+  if (connection_state == connected || connection_state == connecting) {
+    client.disconnect();
+  }
+
+  connection_state = offline;
 }
