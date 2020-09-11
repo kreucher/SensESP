@@ -18,7 +18,7 @@ class Networking : public Configurable {
   virtual JsonObject& get_configuration(JsonBuffer& buf) override final;
   virtual bool set_configuration(const JsonObject& config) override final;
   virtual String get_config_schema() override;
-  void set_offline(bool offline) { this->offline = offline; }
+  void set_offline(bool offline);
   void reset_settings();
 
  protected:

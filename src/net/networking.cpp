@@ -74,6 +74,8 @@ void Networking::setup(std::function<void(bool)> connection_cb, bool restartOnNe
 }
 
 void Networking::setup_saved_ssid() {
+  
+  WiFi.mode(WIFI_STA);
   auto status = WiFi.begin(ap_ssid.c_str(), ap_password.c_str());
   debugI("WiFi begin=%d", status);
 
@@ -95,7 +97,6 @@ void Networking::setup_saved_ssid() {
            WiFi.RSSI());
     debugI("IP address of Device: %s",  WiFi.localIP().toString().c_str());
     connection_callback(true);
-    WiFi.mode(WIFI_STA);
   }
 }
 
@@ -212,4 +213,17 @@ void Networking::reset_settings() {
 
   save_configuration();
   wifi_manager->resetSettings();
+}
+
+void Networking::set_offline(bool offline)
+{
+  this->offline = offline;
+
+  debugI("Setting offline parameter to %d", offline);
+  
+  if(offline && WiFi.status() == WL_CONNECTED)
+  {
+    WiFi.mode(WIFI_OFF);
+    connection_callback(false);
+  }
 }
