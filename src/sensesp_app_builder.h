@@ -16,9 +16,10 @@ class SensESPAppBuilder {
   int led_ws_connected = 200;
   int led_wifi_connected = 1000;
   int led_offline = 5000;
-  bool restart_on_wifi_loss = true
+  bool restart_on_wifi_loss = true;
 
-      public : SensESPAppBuilder() {}
+ public:
+  SensESPAppBuilder(){};
   SensESPAppBuilder* set_wifi(String ssid, String password) {
     this->ssid = ssid;
     this->password = password;
@@ -56,7 +57,8 @@ class SensESPAppBuilder {
   SensESPApp* get_app() {
     return new SensESPApp(hostname, ssid, password, sk_server_address,
                           sk_server_port, sensors, led_pin, enable_led,
-                          led_ws_connected, led_wifi_connected, led_offline, restart_on_wifi_loss);
+                          led_ws_connected, led_wifi_connected, led_offline,
+                          restart_on_wifi_loss);
   }
 };
 
