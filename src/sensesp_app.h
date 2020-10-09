@@ -40,10 +40,12 @@ class SensESPApp {
              StandardSensors sensors = ALL, int led_pin = LED_PIN,
              bool enable_led = ENABLE_LED, int led_ws_connected = 200,
              int led_wifi_connected = 1000, int led_offline = 2000,
-             bool restart_on_wifi_loss = true);
+             int ws_reconnect_interval = 1000);
   void enable();
   void reset();
   String get_hostname();
+  Networking* get_networking() { return this->networking; }
+  WSClient* get_wsclient() { return this->ws_client; }
 
   template <typename T>
   void connect(ValueProducer<T>* pProducer, ValueConsumer<T>* pConsumer,
@@ -76,6 +78,11 @@ class SensESPApp {
    */
   bool isSignalKConnected() { return ws_client->is_connected(); }
 
+  
+  void add_http_handler(String relativeUri, WebRequestMethodComposite method, std::function<void(AsyncWebServerRequest*)> handler)
+  {
+    this->http_server->add_http_handler(relativeUri, method, handler);
+  };
  private:
   void initialize();
   void setup_standard_sensors(ObservableValue<String>* hostname,

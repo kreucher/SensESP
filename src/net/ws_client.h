@@ -11,25 +11,38 @@
 
 static const char* NULL_AUTH_TOKEN = "";
 
-enum ConnectionState { disconnected, authorizing, connecting, connected, offline };
+enum ConnectionState {
+  disconnected,
+  authorizing,
+  connecting,
+  connected,
+  offline
+};
 
 class WSClient : public Configurable {
  public:
   WSClient(String config_path, SKDelta* sk_delta, String server_address,
            uint16_t server_port, std::function<void(bool)> connected_cb,
-           void_cb_func delta_cb);
+           void_cb_func delta_cb, int reconnect_interval = 1000);
   void enable();
   void on_disconnected();
   void on_error();
   void on_connected(uint8_t* payload);
   void on_receive_delta(uint8_t* payload);
   void connect();
+  void reconnect() {
+    if (connection_state == offline) {
+      connection_state = disconnected;
+    }
+    connect();
+  };
   void takeOffline();
   void loop();
   bool is_connected();
   void restart();
   void send_delta();
-
+  
+  const ConnectionState get_state() { return connection_state; }
   const String get_server_address() { return server_address; }
   const uint16_t get_server_port() { return server_port; }
 
@@ -47,7 +60,7 @@ class WSClient : public Configurable {
   String auth_token = NULL_AUTH_TOKEN;
   bool server_detected = false;
   bool token_test_success = false;
-  
+
   // FIXME: replace with a single connection_state enum
   ConnectionState connection_state = disconnected;
   WebSocketsClient client;
@@ -63,6 +76,4 @@ class WSClient : public Configurable {
   void_cb_func delta_cb;
   bool get_mdns_service(String& server_address, uint16_t& server_port);
 };
-
-static WSClient* ws_client = NULL;
 #endif

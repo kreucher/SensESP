@@ -2,7 +2,6 @@
 #define _http_H_
 
 #include <ESPAsyncWebServer.h>
-
 #include <functional>
 
 class HTTPServer {
@@ -15,6 +14,13 @@ class HTTPServer {
   void handle_device_reset(AsyncWebServerRequest* request);
   void handle_device_restart(AsyncWebServerRequest* request);
   void handle_info(AsyncWebServerRequest* request);
+  void add_http_handler(String relativeUri, WebRequestMethodComposite method, std::function<void(AsyncWebServerRequest*)> handler)
+  {
+    if(this->server != NULL)
+    {
+      server->on(relativeUri.c_str(), method, handler);
+    }
+  }
 
  private:
   AsyncWebServer* server;

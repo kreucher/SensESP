@@ -28,7 +28,7 @@ SensESPApp::SensESPApp(String preset_hostname, String ssid,
                        uint16_t sk_server_port, StandardSensors sensors,
                        int led_pin, bool enable_led, int led_ws_connected,
                        int led_wifi_connected, int led_offline,
-                       bool restart_on_wifi_loss) {
+                       int ws_reconnect_interval) {
   // initialize filesystem
 #ifdef ESP8266
   if (!SPIFFS.begin()) {
@@ -137,7 +137,6 @@ void SensESPApp::enable() {
       this->led_blinker->set_wifi_connected();
     } else {
       this->led_blinker->set_wifi_disconnected();
-      debugD("Not connected to wifi");
     }
   });
 

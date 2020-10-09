@@ -21,6 +21,8 @@
 //#define SIGNALK_PRINT_SND_DATA
 //#define SIGNALK_PRINT_RCV_DELTA
 
+WSClient* ws_client = NULL;
+
 void webSocketClientEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_DISCONNECTED:
@@ -36,6 +38,7 @@ void webSocketClientEvent(WStype_t type, uint8_t* payload, size_t length) {
       ws_client->on_receive_delta(payload);
       break;
     default:
+      debugI("WS event %d", type);
       // Do nothing for other types
       break;
   }
@@ -43,7 +46,7 @@ void webSocketClientEvent(WStype_t type, uint8_t* payload, size_t length) {
 
 WSClient::WSClient(String config_path, SKDelta* sk_delta, String server_address,
                    uint16_t server_port, std::function<void(bool)> connected_cb,
-                   void_cb_func delta_cb)
+                   void_cb_func delta_cb, int reconnect_interval)
     : Configurable{config_path} {
   this->sk_delta = sk_delta;
 
@@ -64,12 +67,12 @@ void WSClient::enable() {
   app.onDelay(0, [this]() { this->connect(); });
   app.onRepeat(20, [this]() { this->loop(); });
   app.onRepeat(100, [this]() { this->send_delta(); });
-  app.onRepeat(10000, [this]() { this->connect_loop(); });
+  app.onRepeat(500, [this]() { this->connect_loop(); });
 }
 
 void WSClient::connect_loop() {
-  if (this->connection_state == disconnected) {
-    this->connect();
+  if (this->connection_state == disconnected && sensesp_app->isWifiConnected()) {
+      this->connect();
   }
 }
 
@@ -189,21 +192,18 @@ bool WSClient::get_mdns_service(String& server_address, uint16_t& server_port) {
 }
 
 void WSClient::connect() {
-  if (connection_state == offline) {
-    // enable reconnection if state of offline
-    connection_state == disconnected;
-  }
+  debugI("WSClient connect (state=%d)", connection_state);
 
   if (connection_state != disconnected) {
     return;
   }
 
-  connection_state = authorizing;
-
-  String server_address = this->server_address;
-  uint16_t server_port = this->server_port;
-
   if (WiFi.isConnected()) {
+    connection_state = authorizing;
+
+    String server_address = this->server_address;
+    uint16_t server_port = this->server_port;
+
     debugD("Initiating connection");
 
     if (this->server_address.isEmpty()) {
@@ -238,19 +238,20 @@ void WSClient::connect() {
       return;
     }
 
-    if (!token_test_success)  // test token once, if last attempt was success just connect WS
-                              // (after device sleep or ws connection loss)
+    if (!token_test_success)  // test token once, if last attempt was success
+                              // just connect WS (after device sleep or ws
+                              // connection loss)
     {
       this->test_token(server_address, server_port);
     } else {
       server_detected = true;
       this->connect_ws(server_address, server_port);
     }
-  } else {
+  }/* else {
     debugI(
         "WiFi is disconnected. SignalK client connection will connect when "
         "WiFi is connected.");
-  }
+  }*/
 }
 
 void WSClient::test_token(const String server_address,
@@ -261,6 +262,10 @@ void WSClient::test_token(const String server_address,
   String url = String("http://") + server_address + ":" + server_port +
                "/signalk/v1/api/";
   debugD("Testing token with url %s", url.c_str());
+
+  http.setConnectTimeout(2000);
+  http.setTimeout(1000);
+
   http.begin(url);
   String full_token = String("JWT ") + auth_token;
   http.addHeader("Authorization", full_token.c_str());
@@ -420,7 +425,7 @@ void WSClient::poll_access_request(const String server_address,
 
 void WSClient::connect_ws(const String host, const uint16_t port) {
   String path = "/signalk/v1/stream?subscribe=none";
-  this->connection_state = connecting;
+  this->connection_state = connecting; 
   this->client.begin(host, port, path);
   this->client.onEvent(webSocketClientEvent);
   String full_token = String("JWT ") + auth_token;
@@ -529,7 +534,13 @@ bool WSClient::set_configuration(const JsonObject& config) {
 
 void WSClient::takeOffline() {
   if (connection_state == connected || connection_state == connecting) {
+    debugI("Disconnecting WS socket...");
     client.disconnect();
+
+    while (connection_state != disconnected) {
+      client.loop();
+    }
+    debugI("WS Socket is closed!");
   }
 
   connection_state = offline;

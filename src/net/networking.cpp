@@ -15,8 +15,8 @@ bool should_save_config = false;
 
 void save_config_callback() { should_save_config = true; }
 
-Networking::Networking(String config_path, String ssid,
-                       String password, String hostname)
+Networking::Networking(String config_path, String ssid, String password,
+                       String hostname)
     : Configurable{config_path} {
   this->hostname = new ObservableValue<String>(hostname);
 
@@ -25,8 +25,7 @@ Networking::Networking(String config_path, String ssid,
   preset_hostname = hostname;
 
   if (!ssid.isEmpty()) {
-    debugI("Using hard-coded SSID %s and password",
-           ssid.c_str());
+    debugI("Using hard-coded SSID %s and password", ssid.c_str());
     this->ap_ssid = ssid;
     this->ap_password = password;
   } else {
@@ -36,68 +35,60 @@ Networking::Networking(String config_path, String ssid,
   dns = new DNSServer();
   wifi_manager = new AsyncWiFiManager(server, dns);
 
-  //set singleton object
-  networking = this;
+  WiFi.onEvent(
+      [this](WiFiEvent_t event, WiFiEventInfo_t info) {
+        debugI("Got ip address of Device: %s",
+               IPAddress(info.got_ip.ip_info.ip.addr).toString().c_str());
+        connection_callback(true);
+      },
+      SYSTEM_EVENT_STA_GOT_IP);
+
+  WiFi.onEvent(
+      [this](WiFiEvent_t event, WiFiEventInfo_t info) {
+        debugI("Connected to WiFi, SSID: %s (signal: %d)", info.connected.ssid,
+               WiFi.RSSI());
+      },
+      SYSTEM_EVENT_STA_CONNECTED);  // if we are connected to Wifi
+  WiFi.onEvent(
+      [this](WiFiEvent_t event, WiFiEventInfo_t info) {
+        auto reason = get_disconnected_reason(info.disconnected.reason);
+
+        debugD("WiFi disconnected. Reason=%s.",
+               reason.c_str());  // info.disconnected.reason);
+
+        connection_callback(false);
+      },
+      SYSTEM_EVENT_STA_DISCONNECTED);
 }
 
 void Networking::check_connection() {
-    if (!offline && WiFi.status() != WL_CONNECTED) {
-      // if connection is lost, simply restart
-        debugD("Wifi disconnected: restarting...");
-        if(restart_on_disconnection)
-        {
-          ESP.restart();
-        }
-        else
-        {
-          auto wifiStatus = WiFi.status();
-          debugD("WiFi status: %d", wifiStatus);
-          if(wifiStatus == WS_DISCONNECT)
-          {
-            setup_saved_ssid();
-          }
-        }
+  if (!offline && WiFi.status() != WL_CONNECTED) {
+    // if connection is lost, simply restart
+    auto wifiStatus = WiFi.status();
+    debugD("WiFi status: %d", wifiStatus);
+    if (wifiStatus != WL_CONNECTED) {
+      setup_saved_ssid();
     }
+  }
 }
 
-void Networking::setup(std::function<void(bool)> connection_cb, bool restartOnNetworkLoss) {
-  restart_on_disconnection = restartOnNetworkLoss;
+void Networking::setup(std::function<void(bool)> connection_cb) {
   connection_callback = connection_cb;
 
   if (ap_ssid != "" && ap_password != "") {
     setup_saved_ssid();
   }
-  if (ap_ssid == "" && WiFi.status() != WL_CONNECTED) {
+  if (useWifiManager && ap_ssid == "" && WiFi.status() != WL_CONNECTED) {
     setup_wifi_manager();
   }
-  app.onRepeat(1000, std::bind(&Networking::check_connection, this));
+
+  app.onRepeat(5000, std::bind(&Networking::check_connection, this));
 }
 
 void Networking::setup_saved_ssid() {
-  
   WiFi.mode(WIFI_STA);
   auto status = WiFi.begin(ap_ssid.c_str(), ap_password.c_str());
-  debugI("WiFi begin=%d", status);
-
-  uint32_t timer_start = millis();
-
-  debugI("Connecting to wifi %s.", ap_ssid.c_str());
-  int printCounter = 0;
-  while (WiFi.status() != WL_CONNECTED &&
-         (millis() - timer_start) < 3 * 60 * 1000) {
-    delay(500);
-    if (printCounter % 4) {
-      debugI("Wifi status=%d, time=%d ms", WiFi.status(), millis() - timer_start);
-    }
-    printCounter++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    debugI("Connected to wifi, SSID: %s (signal: %d)", WiFi.SSID().c_str(),
-           WiFi.RSSI());
-    debugI("IP address of Device: %s",  WiFi.localIP().toString().c_str());
-    connection_callback(true);
-  }
+  debugI("WiFi begin result=%d", status);
 }
 
 void Networking::setup_wifi_manager() {
@@ -145,12 +136,6 @@ void Networking::setup_wifi_manager() {
 
 ObservableValue<String>* Networking::get_hostname() { return this->hostname; }
 
-// No longer used
-// void Networking::set_hostname(String hostname) {
-//  debugD("Setting hostname");
-//  this->hostname->set(hostname);
-//}
-
 static const char SCHEMA_PREFIX[] PROGMEM = R"({
 "type": "object",
 "properties": {
@@ -165,19 +150,22 @@ String get_property_row(String key, String title, bool readonly) {
     readonly_property = ",\"readOnly\":true";
   }
 
-  return "\"" + key + "\":{\"title\":\"" + title + readonly_title + "\","
-    + "\"type\":\"string\"" + readonly_property + "}";
+  return "\"" + key + "\":{\"title\":\"" + title + readonly_title + "\"," +
+         "\"type\":\"string\"" + readonly_property + "}";
 }
 
 String Networking::get_config_schema() {
   String schema;
   bool hostname_preset = preset_hostname != "";
   bool wifi_preset = preset_ssid != "";
-  return String(FPSTR(SCHEMA_PREFIX))
-    + get_property_row("hostname", "ESP device hostname", hostname_preset) + ","
-    + get_property_row("ap_ssid", "Wifi Access Point SSID", wifi_preset) + ","
-    + get_property_row("ap_password", "Wifi Access Point Password", wifi_preset)
-    + "}}";
+  return String(FPSTR(SCHEMA_PREFIX)) +
+         get_property_row("hostname", "ESP device hostname", hostname_preset) +
+         "," +
+         get_property_row("ap_ssid", "Wifi Access Point SSID", wifi_preset) +
+         "," +
+         get_property_row("ap_password", "Wifi Access Point Password",
+                          wifi_preset) +
+         "}}";
 }
 
 JsonObject& Networking::get_configuration(JsonBuffer& buf) {
@@ -198,7 +186,7 @@ bool Networking::set_configuration(const JsonObject& config) {
   if (preset_hostname == "") {
     this->hostname->set(config["hostname"].as<String>());
   }
-  
+
   if (preset_ssid == "") {
     debugW("Ignoring saved SSID and password");
     this->ap_ssid = config["ap_ssid"].as<String>();
@@ -215,15 +203,24 @@ void Networking::reset_settings() {
   wifi_manager->resetSettings();
 }
 
-void Networking::set_offline(bool offline)
-{
+void Networking::set_offline(bool offline) {
   this->offline = offline;
 
   debugI("Setting offline parameter to %d", offline);
-  
-  if(offline && WiFi.status() == WL_CONNECTED)
-  {
+
+  if (offline) {
     WiFi.mode(WIFI_OFF);
     connection_callback(false);
+  }
+}
+
+String Networking::get_disconnected_reason(uint8_t reason) {
+  if (reason == WIFI_REASON_NO_AP_FOUND) {
+    return String("no AP found");
+  } else if (reason == WIFI_REASON_NOT_ASSOCED ||
+             reason == WIFI_REASON_NOT_AUTHED) {
+    return String("rejected or bad password");
+  } else {
+    return String((int)reason);
   }
 }
