@@ -51,8 +51,7 @@
       "name": "ESPAsyncWiFiManager"
     },
     {
-      "name": "ArduinoJson",
-      "version": "^5.0.0"
+      "name": "ArduinoJson"
     },
     {
       "name": "WebSockets"
@@ -89,7 +88,10 @@
       "name": "Adafruit MAX31856 library"
     },
     {
-      "name": "Adafruit AHRS"
+      "name": "Adafruit Unified Sensor"
+    },
+    {
+      "name": "Adafruit BusIO"
     },
     {
       "name": "Adafruit Unified Sensor"

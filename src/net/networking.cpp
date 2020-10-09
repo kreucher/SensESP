@@ -136,6 +136,7 @@ void Networking::setup_wifi_manager() {
 
 ObservableValue<String>* Networking::get_hostname() { return this->hostname; }
 
+
 static const char SCHEMA_PREFIX[] PROGMEM = R"({
 "type": "object",
 "properties": {
@@ -156,7 +157,11 @@ String get_property_row(String key, String title, bool readonly) {
 
 String Networking::get_config_schema() {
   String schema;
-  bool hostname_preset = preset_hostname != "";
+  // If hostname is not set by SensESPAppBuilder::set_hostname() in main.cpp,
+  // then preset_hostname will be "SensESP", and should not be read-only in the
+  // Config UI. If preset_hostname is not "SensESP", then it was set in main.cpp, so
+  // it should be read-only.
+  bool hostname_preset = preset_hostname != "SensESP";
   bool wifi_preset = preset_ssid != "";
   return String(FPSTR(SCHEMA_PREFIX)) +
          get_property_row("hostname", "ESP device hostname", hostname_preset) +
@@ -168,14 +173,11 @@ String Networking::get_config_schema() {
          "}}";
 }
 
-JsonObject& Networking::get_configuration(JsonBuffer& buf) {
-  JsonObject& root = buf.createObject();
+void Networking::get_configuration(JsonObject& root) {
 
   root["hostname"] = this->hostname->get();
   root["ap_ssid"] = this->ap_ssid;
   root["ap_password"] = this->ap_password;
-
-  return root;
 }
 
 bool Networking::set_configuration(const JsonObject& config) {
@@ -183,12 +185,12 @@ bool Networking::set_configuration(const JsonObject& config) {
     return false;
   }
 
-  if (preset_hostname == "") {
+  if (preset_hostname == "SensESP") {
     this->hostname->set(config["hostname"].as<String>());
   }
 
   if (preset_ssid == "") {
-    debugW("Ignoring saved SSID and password");
+    debugW("Using saved SSID and password");
     this->ap_ssid = config["ap_ssid"].as<String>();
     this->ap_password = config["ap_password"].as<String>();
   }
