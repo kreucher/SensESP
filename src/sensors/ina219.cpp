@@ -19,6 +19,8 @@ INA219::INA219(uint8_t addr, INA219CAL_t calibration_setting,
     ina219->setCalibration_32V_1A();
   } else if (calibration_setting == cal16_400) {
     ina219->setCalibration_16V_400mA();
+  } else if (calibration_setting == cal16_150) {
+    ina219->setCalibration_16V_150A();
   }
 }
 

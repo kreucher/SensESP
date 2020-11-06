@@ -11,7 +11,7 @@
 // These are the used to tell the constructor what to set for maximum voltage
 // and amperage. The default in the Adafruit constructor is 32V and 2A, so we
 // only need to handle the other two.
-enum INA219CAL_t { cal32_2, cal32_1, cal16_400 };
+enum INA219CAL_t { cal32_2, cal32_1, cal16_400, cal16_150 };
 
 // INA219 represents an ADAfruit (or compatible) INA219 High Side DC Current
 // Sensor. The constructor creates a pointer to the instance, and starts up the
