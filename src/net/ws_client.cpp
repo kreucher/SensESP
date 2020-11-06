@@ -287,6 +287,7 @@ void WSClient::send_access_request(const String server_address,
   serializeJson(doc, json_req);
 
   HTTPClient http;
+  http.setTimeout(5000);
 
   String url = String("http://") + server_address + ":" + server_port +
                "/signalk/v1/access/requests";
