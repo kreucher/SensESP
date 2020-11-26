@@ -13,7 +13,6 @@
 #include "sensors/digital_input.h"
 #include "sensors/system_info.h"
 #include "signalk/signalk_output.h"
-#include "system/led_controller.h"
 #include "system/spiffs_storage.h"
 #include "transforms/difference.h"
 #include "transforms/frequency.h"
@@ -37,23 +36,12 @@ void SetupSerialDebug(uint32_t baudrate) {
 
 static char* permission_strings[] = {"readonly", "readwrite", "admin"};
 
-/*
- * This constructor must be only used in SensESPAppBuilder
- */
-SensESPApp::SensESPApp(bool defer_setup) {}
-
 SensESPApp::SensESPApp(String preset_hostname, String ssid,
                        String wifi_password, String sk_server_address,
-                       uint16_t sk_server_port)
-    : preset_hostname{preset_hostname},
-      ssid{ssid},
-      wifi_password{wifi_password},
-      sk_server_address{sk_server_address},
-      sk_server_port{sk_server_port} {
-  setup();
-}
-
-void SensESPApp::setup() {
+                       uint16_t sk_server_port, StandardSensors sensors,
+                       int led_pin, bool enable_led, int led_ws_connected,
+                       int led_wifi_connected, int led_offline,
+                       SKPermissions permissions) {
   // initialize filesystem
 #ifdef ESP8266
   if (!SPIFFS.begin()) {
@@ -82,26 +70,26 @@ void SensESPApp::setup() {
   hostname->attach(
       [hostname, this]() { this->sk_delta->set_hostname(hostname->get()); });
 
+  led_blinker = new LedBlinker(led_pin, led_ws_connected, led_wifi_connected,
+                               led_offline);
+
   // create the HTTP server
 
   this->http_server = new HTTPServer(std::bind(&SensESPApp::reset, this));
 
   // create the websocket client
 
-  this->ws_client =
-      new WSClient("/system/sk", sk_delta, sk_server_address, sk_server_port,
-                   permission_strings[(int)requested_permissions]);
-
-  // create controllers and connect them to their data sources
-
-  if (visual_output_controllers.empty()) {
-    visual_output_controllers.push_front(new LedController(LED_PIN));
-  }
-  for (auto controller : visual_output_controllers) {
-    this->networking->connect_to(controller);
-    this->ws_client->connect_to(controller);
-    this->ws_client->get_delta_count_producer().connect_to(controller);
-  }
+  auto ws_connected_cb = [this](bool connected) {
+    if (connected) {
+      this->led_blinker->set_server_connected();
+    } else {
+      this->led_blinker->set_server_disconnected();
+    }
+  };
+  auto ws_delta_cb = [this]() { this->led_blinker->flip(); };
+  this->ws_client = new WSClient("/system/sk", sk_delta, sk_server_address,
+                                 sk_server_port, ws_connected_cb, ws_delta_cb,
+                                 permission_strings[(int)permissions]);
 }
 
 void SensESPApp::setup_standard_sensors(ObservableValue<String>* hostname,
@@ -136,6 +124,8 @@ void SensESPApp::setup_standard_sensors(ObservableValue<String>* hostname,
 }
 
 void SensESPApp::enable() {
+  this->led_blinker->set_wifi_disconnected();
+
   // connect all transforms to the Signal K delta output
 
   // ObservableValue<String>* hostname = networking->get_hostname();
@@ -152,14 +142,28 @@ void SensESPApp::enable() {
   debugI("Enabling subsystems");
 
   // FIXME: Setting up mDNS discovery before networking can't work!
+  debugI("Subsystem: setup_discovery()");
   setup_discovery(networking->get_hostname()->get().c_str());
 
-  networking->setup();
+  debugI("Subsystem: networking->setup()");
+  networking->setup([this](bool connected) {
+    if (connected) {
+      this->led_blinker->set_wifi_connected();
+    } else {
+      this->led_blinker->set_wifi_disconnected();
+      debugD("Not connected to wifi");
+    }
+  });
 
+  debugI("Subsystem: setup_OTA()");
   setup_ota();
 
+  debugI("Subsystem: http_server()");
   this->http_server->enable();
+  debugI("Subsystem: ws_client()");
   this->ws_client->enable();
+
+  debugI("WS client enabled");
 
   // initialize remote debugging
 

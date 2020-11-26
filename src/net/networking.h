@@ -9,30 +9,22 @@
 
 #include "system/configurable.h"
 #include "system/observablevalue.h"
-#include "system/valueproducer.h"
 
-enum WifiState {
-  kWifiNoAP = 0,
-  kWifiDisconnected,
-  kWifiConnectedToAP,
-  kExecutingWifiManager
-};
-
-class Networking : public Configurable, public ValueProducer<WifiState> {
+class Networking : public Configurable {
  public:
   Networking(String config_path, String ssid, String password, String hostname);
-  void setup();
+  void setup(std::function<void(bool)> connection_cb);
   ObservableValue<String>* get_hostname();
   virtual void get_configuration(JsonObject& doc) override final;
   virtual bool set_configuration(const JsonObject& config) override final;
   virtual String get_config_schema() override;
-  
+
   void reset_settings();
 
  protected:
   void check_connection();
-  void setup_saved_ssid();
-  void setup_wifi_manager();
+  void setup_saved_ssid(std::function<void(bool)> connection_cb);
+  void setup_wifi_manager(std::function<void(bool)> connection_cb);
 
  private:
   AsyncWebServer* server;

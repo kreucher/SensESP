@@ -20,8 +20,6 @@ Networking::Networking(String config_path, String ssid, String password,
     : Configurable{config_path} {
   this->hostname = new ObservableValue<String>(hostname);
 
-  this->output = kWifiNoAP;
-
   preset_ssid = ssid;
   preset_password = password;
   preset_hostname = hostname;
@@ -42,28 +40,22 @@ void Networking::check_connection() {
   if (WiFi.status() != WL_CONNECTED) {
     // if connection is lost, simply restart
     debugD("Wifi disconnected: restarting...");
-
-    // Might be futile to notify about a disconnection if it results in
-    // a reboot anyway
-    this->emit(kWifiDisconnected);
-
     ESP.restart();
   }
 }
 
-void Networking::setup() {
+void Networking::setup(std::function<void(bool)> connection_cb) {
   if (ap_ssid != "" && ap_password != "") {
-    setup_saved_ssid();
+    setup_saved_ssid(connection_cb);
   }
   if (ap_ssid == "" && WiFi.status() != WL_CONNECTED) {
-    setup_wifi_manager();
+    setup_wifi_manager(connection_cb);
   }
   app.onRepeat(1000, std::bind(&Networking::check_connection, this));
 }
 
-void Networking::setup_saved_ssid() {
+void Networking::setup_saved_ssid(std::function<void(bool)> connection_cb) {
   WiFi.begin(ap_ssid.c_str(), ap_password.c_str());
-  this->emit(kWifiDisconnected);
 
   uint32_t timer_start = millis();
 
@@ -82,12 +74,12 @@ void Networking::setup_saved_ssid() {
     debugI("Connected to wifi, SSID: %s (signal: %d)", WiFi.SSID().c_str(),
            WiFi.RSSI());
     debugI("IP address of Device: %s", WiFi.localIP().toString().c_str());
-    this->emit(kWifiConnectedToAP);
+    connection_cb(true);
     WiFi.mode(WIFI_STA);
   }
 }
 
-void Networking::setup_wifi_manager() {
+void Networking::setup_wifi_manager(std::function<void(bool)> connection_cb) {
   should_save_config = false;
 
   // set config save notify callback
@@ -108,19 +100,14 @@ void Networking::setup_wifi_manager() {
   config_ssid = "Configure " + config_ssid;
   const char* pconfig_ssid = config_ssid.c_str();
 
-  this->emit(kExecutingWifiManager);
-
   if (!wifi_manager->autoConnect(pconfig_ssid)) {
     debugE("Failed to connect to wifi and config timed out. Restarting...");
-
-    this->emit(kWifiDisconnected);
-
     ESP.restart();
   }
 
   debugI("Connected to wifi,");
   debugI("IP address of Device: %s", WiFi.localIP().toString().c_str());
-  this->emit(kWifiConnectedToAP);
+  connection_cb(true);
 
   if (should_save_config) {
     String new_hostname = custom_hostname.getValue();

@@ -16,7 +16,6 @@
 
 #include "sensesp_app.h"
 #include "signalk/signalk_listener.h"
-#include "signalk/signalk_put_request_listener.h"
 
 WSClient* ws_client;
 
@@ -41,7 +40,9 @@ void webSocketClientEvent(WStype_t type, uint8_t* payload, size_t length) {
 }
 
 WSClient::WSClient(String config_path, SKDelta* sk_delta, String server_address,
-                   uint16_t server_port, String permission)
+                   uint16_t server_port,
+                   std::function<void(bool)> connected_cb,
+                   void_cb_func delta_cb, String permission)
     : Configurable{config_path} {
   this->sk_delta = sk_delta;
 
@@ -50,16 +51,10 @@ WSClient::WSClient(String config_path, SKDelta* sk_delta, String server_address,
   this->server_address = server_address;
   this->server_port = server_port;
 
+  this->connected_cb = connected_cb;
+  this->delta_cb = delta_cb;
+
   this->sk_permission = permission;
-
-  // a WSClient object observes its own connection_state member
-  // and simply passes through any notification it emits. As a result,
-  // whenever the value of connection_state is updated, observers of the
-  // WSClient object get automatically notified.
-  this->connection_state.attach([this]() {
-    this->emit(this->connection_state.get()); 
-  });
-
   // set the singleton object pointer
   ws_client = this;
 
@@ -74,13 +69,13 @@ void WSClient::enable() {
 }
 
 void WSClient::connect_loop() {
-  if (this->connection_state == kWSDisconnected) {
+  if (this->connection_state == disconnected) {
     this->connect();
   }
 }
 
 void WSClient::on_disconnected() {
-  if (this->connection_state == kWSConnecting && server_detected) {
+  if (this->connection_state == connecting && server_detected) {
     // Going from connecting directly to disconnect when we
     // know we have found and talked to the server usually means
     // the authentication token is bad.
@@ -88,18 +83,21 @@ void WSClient::on_disconnected() {
     auth_token = NULL_AUTH_TOKEN;
     save_configuration();
   }
-  this->connection_state = kWSDisconnected;
+  this->connection_state = disconnected;
   server_detected = false;
+  this->connected_cb(false);
 }
 
 void WSClient::on_error() {
-  this->connection_state = kWSDisconnected;
+  this->connection_state = disconnected;
   debugW("Websocket client error.");
+  this->connected_cb(false);
 }
 
 void WSClient::on_connected(uint8_t* payload) {
-  this->connection_state = kWSConnected;
+  this->connection_state = connected;
   debugI("Websocket client connected to URL: %s\n", payload);
+  this->connected_cb(true);
   debugI("Subscribing to Signal K listeners...");
   this->subscribe_listeners();
 }
@@ -143,71 +141,29 @@ void WSClient::on_receive_delta(uint8_t* payload) {
   auto error = deserializeJson(message, payload);
 
   if (!error) {
+    JsonArray updates = message["updates"];
 
-    if (message.containsKey("updates")) {
-      // Process updates from subscriptions...
-      JsonArray updates = message["updates"];
+    for (size_t i = 0; i < updates.size(); i++) {
+      JsonObject update = updates[i];
 
-      for (size_t i = 0; i < updates.size(); i++) {
-        JsonObject update = updates[i];
+      JsonArray values = update["values"];
 
-        JsonArray values = update["values"];
+      for (size_t vi = 0; vi < values.size(); vi++) {
+        JsonObject value = values[vi];
 
-        for (size_t vi = 0; vi < values.size(); vi++) {
-          JsonObject value = values[vi];
+        const char* path = value["path"];
+        // debugD("Got update of value %s\n", path);
 
-          const char* path = value["path"];
-          debugD("Got update of value %s\n", path);
+        const std::vector<SKListener*>& listeners = SKListener::get_listeners();
 
-          const std::vector<SKListener*>& listeners = SKListener::get_listeners();
-
-          for (size_t i = 0; i < listeners.size(); i++) {
-            SKListener* listener = listeners[i];
-            if (listener->get_sk_path().equals(path)) {
-              listener->parse_value(value);
-            }
+        for (size_t i = 0; i < listeners.size(); i++) {
+          SKListener* listener = listeners[i];
+          if (listener->get_sk_path().equals(path)) {
+            listener->parse_value(value);
           }
         }
       }
     }
-
-    if (message.containsKey("put")) {
-      // Process PUT requests...
-      JsonArray puts = message["put"];
-      size_t responseCount = 0;
-      for (size_t i = 0; i < puts.size(); i++) {
-          JsonObject put = puts[i];
-          const char* path = put["path"];
-          String strVal = put["value"].as<String>();
-          debugD("Received PUT request for path %s (value %s)\n", path, strVal.c_str());
-          const std::vector<SKPutListener*>& listeners = SKPutListener::get_listeners();
-          for (size_t i = 0; i < listeners.size(); i++) {
-            SKPutListener* listener = listeners[i];
-            if (listener->get_sk_path().equals(path)) {
-              listener->parse_value(put);
-              responseCount++;
-            }
-          }
-
-          // Send back a request reasponse...
-          DynamicJsonDocument putResponse(512);
-          putResponse["requestId"] = message["requestId"];
-          if (responseCount == puts.size()) {
-            // We found a response for every PUT request
-            putResponse["state"] = "COMPLETED";
-            putResponse["statusCode"] = 200;
-          }
-          else {
-            // One or more requests did not have a matching path
-            putResponse["state"] = "FAILED";
-            putResponse["statusCode"] = 405;
-          }
-          String responseTxt;
-          serializeJson(putResponse, responseTxt);
-          debugD("Replying to PUT request with %s", responseTxt.c_str());
-          this->client.sendTXT(responseTxt);
-      }
-    }    
   } else {
     debugE("deserializeJson error: %s", error.c_str());
   }
@@ -228,12 +184,12 @@ bool WSClient::get_mdns_service(String& server_address, uint16_t& server_port) {
 }
 
 void WSClient::connect() {
-  if (connection_state != kWSDisconnected) {
+  if (connection_state != disconnected) {
     return;
   }
   debugD("Initiating connection");
 
-  connection_state = kWSAuthorizing;
+  connection_state = authorizing;
 
   String server_address = this->server_address;
   uint16_t server_port = this->server_port;
@@ -252,7 +208,7 @@ void WSClient::connect() {
            server_address.c_str(), server_port);
   } else {
     // host and port not defined - wait for mDNS
-    connection_state = kWSDisconnected;
+    connection_state = disconnected;
     return;
   }
 
@@ -303,11 +259,11 @@ void WSClient::test_token(const String server_address,
       this->client_id = "";
       this->send_access_request(server_address, server_port);
     } else {
-      connection_state = kWSDisconnected;
-  }
+      connection_state = disconnected;
+    }
   } else {
     debugE("GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
-    connection_state = kWSDisconnected;
+    connection_state = disconnected;
   }
 }
 
@@ -345,7 +301,7 @@ void WSClient::send_access_request(const String server_address,
   if (httpCode != 202) {
     debugW("Can't handle response %d to access request.", httpCode);
     debugD("%s", payload.c_str());
-    connection_state = kWSDisconnected;
+    connection_state = disconnected;
     client_id = "";
     return;
   }
@@ -357,7 +313,7 @@ void WSClient::send_access_request(const String server_address,
 
   if (state != "PENDING") {
     debugW("Got unknown state: %s", state.c_str());
-    connection_state = kWSDisconnected;
+    connection_state = disconnected;
     client_id = "";
     return;
   }
@@ -410,7 +366,7 @@ void WSClient::poll_access_request(const String server_address,
 
       if (permission == "DENIED") {
         debugW("Permission denied");
-        connection_state = kWSDisconnected;
+        connection_state = disconnected;
         return;
       } else if (permission == "APPROVED") {
         debugI("Permission granted");
@@ -432,19 +388,19 @@ void WSClient::poll_access_request(const String server_address,
       debugD("Got 500, probably a non-existing request.");
       polling_href = "";
       save_configuration();
-      connection_state = kWSDisconnected;
+      connection_state = disconnected;
       return;
     }
     // any other HTTP status code
     debugW("Can't handle response %d to pending access request.\n", httpCode);
-    connection_state = kWSDisconnected;
+    connection_state = disconnected;
     return;
   }
 }
 
 void WSClient::connect_ws(const String host, const uint16_t port) {
   String path = "/signalk/v1/stream?subscribe=none";
-  this->connection_state = kWSConnecting;
+  this->connection_state = connecting;
   this->client.begin(host, port, path);
   this->client.onEvent(webSocketClientEvent);
   String full_token = String("JWT ") + auth_token;
@@ -452,29 +408,28 @@ void WSClient::connect_ws(const String host, const uint16_t port) {
 }
 
 void WSClient::loop() {
-  if (this->connection_state == kWSConnecting ||
-      this->connection_state == kWSConnected) {
+  if (this->connection_state == connecting ||
+      this->connection_state == connected) {
     this->client.loop();
   }
 }
 
-bool WSClient::is_connected() { return connection_state == kWSConnected; }
+bool WSClient::is_connected() { return connection_state == connected; }
 
 void WSClient::restart() {
-  if (connection_state == kWSConnected) {
+  if (connection_state == connected) {
     this->client.disconnect();
-    connection_state = kWSDisconnected;
+    connection_state = disconnected;
   }
 }
 
 void WSClient::send_delta() {
   String output;
-  if (connection_state == kWSConnected) {
+  if (connection_state == connected) {
     if (sk_delta->data_available()) {
       sk_delta->get_delta(output);
       this->client.sendTXT(output);
-      // This automatically notifies the observers
-      this->delta_count_producer = 1;
+      this->delta_cb();
     }
   }
 }
