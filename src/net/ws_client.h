@@ -8,12 +8,12 @@
 #include "sensesp.h"
 #include "signalk/signalk_delta.h"
 #include "system/configurable.h"
-#include "system/valueproducer.h"
 #include "system/observablevalue.h"
+#include "system/valueproducer.h"
 
 static const char* NULL_AUTH_TOKEN = "";
 
-enum WSConnectionState {
+enum class WSConnectionState {
   kWSDisconnected,
   kWSAuthorizing,
   kWSConnecting,
@@ -29,11 +29,20 @@ class WSClient : public Configurable, public ValueProducer<WSConnectionState> {
   void on_error();
   void on_connected(uint8_t* payload);
   void on_receive_delta(uint8_t* payload);
+  void on_receive_updates(DynamicJsonDocument& message);
+  void on_receive_put(DynamicJsonDocument& message);
   void connect();
   void loop();
   bool is_connected();
   void restart();
   void send_delta();
+
+  /**
+   * Sends the specified payload to the server over the websocket
+   * this client is connected to. If no connection currently exist,
+   * the call is safely ignored.
+   */
+  void sendTXT(String& payload);
 
   const String get_server_address() const { return server_address; }
   const uint16_t get_server_port() const { return server_port; }
@@ -49,7 +58,9 @@ class WSClient : public Configurable, public ValueProducer<WSConnectionState> {
    * Return a delta update ValueProducer that produces the number of sent deltas
    * (ordinarily always 1)
    */
-  ValueProducer<int>& get_delta_count_producer() { return delta_count_producer; };
+  ValueProducer<int>& get_delta_count_producer() {
+    return delta_count_producer;
+  };
 
  private:
   String server_address = "";
@@ -61,8 +72,10 @@ class WSClient : public Configurable, public ValueProducer<WSConnectionState> {
   String auth_token = NULL_AUTH_TOKEN;
   String sk_permission;
   bool server_detected = false;
+  bool token_test_success = false;
 
-  ObservableValue<WSConnectionState> connection_state = kWSDisconnected;
+  ObservableValue<WSConnectionState> connection_state =
+      WSConnectionState::kWSDisconnected;
   WiFiClient wifi_client;
   WebSocketsClient client;
   SKDelta* sk_delta;
