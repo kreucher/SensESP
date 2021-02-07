@@ -5,9 +5,10 @@
 #include "transforms/click_type.h"
 
 /**
- * SmartSwitchController is a high level transform designed specifically to
- * control a LoadController. This controller accepts inputs from a generic boolean
- * producer (usually a SignalK listener), as well as String and ClickType transforms.
+ * @brief A high level transform designed to control a digital output
+ * (such as a relay) via manual button presses or programatic commands. 
+ * To accomplish this, the controller accepts inputs from a generic boolean
+ * producer (usually a SignalK listener), as well as String and ClickType inputs.
  * The latter allows a physical button to control the load as well as
  * add special behaviors to the sensor application. In particular, an ultra
  * long press of the button will cause the MCU to reboot.
@@ -25,7 +26,6 @@
  * that represents a non-zero value), etc. Case is insensitive. Any 
  * incoming String that doesn't evaluate to a "valid truth type" will be treated as 
  * a "click", and will toggle the output btween "on" and "off". 
- * @see LoadController 
  * @see TextToTruth 
  * @see ClickType
  */
@@ -34,6 +34,14 @@ class SmartSwitchController : public BooleanTransform,
                               public ValueConsumer<String> {
 
      public:
+       /**
+        * The constructor
+        * @param auto_initialize If TRUE, the controller will emit an
+        *  initial "off" status when enabled. This is generally the
+        *  desired case unless this controller is mirroring the state
+        *  of a remote load.
+        */
+       SmartSwitchController(bool auto_initialize = true) : auto_initialize_{auto_initialize} {}
        void enable() override;
        void set_input(bool new_value, uint8_t input_channel = 0) override;
        void set_input(String new_value, uint8_t input_channel = 0) override;
@@ -41,6 +49,7 @@ class SmartSwitchController : public BooleanTransform,
 
      protected:
        bool is_on = false;
+       bool auto_initialize_;
 };
 
 #endif

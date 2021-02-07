@@ -3,6 +3,10 @@
 
 #include "sensesp_app.h"
 
+/**
+ * @brief A class for quickly configuring a SensESP application object before
+ * wiring up your sensors.
+ */
 class SensESPAppBuilder {
  private:
   String hostname_ = "SensESP";
@@ -39,6 +43,10 @@ class SensESPAppBuilder {
   }
   SensESPAppBuilder* set_system_status_led(SystemStatusLed* system_status_led) {
     app->set_system_status_led(system_status_led);
+    return this;
+  }
+  SensESPAppBuilder* set_test_auth_on_each_connect(bool val) {
+    WSClient::test_auth_on_each_connect_ = val;
     return this;
   }
   SensESPApp* get_app() {
