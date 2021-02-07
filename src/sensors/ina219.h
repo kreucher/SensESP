@@ -9,13 +9,6 @@
 /* The INA219 classes are based on the ADAfruit_INA219 library. */
 
 /**
- * These are used to tell the constructor what to set for maximum voltage
- * and amperage. The default in the Adafruit constructor is 32V and 2A.
- **/
-
-enum INA219CAL_t { cal32_2, cal32_1, cal16_400 };
-
-/**
  * @brief  Represents an ADAfruit (or compatible) INA219 High Side DC Current
  * Sensor. 
  * 
@@ -33,8 +26,20 @@ enum INA219CAL_t { cal32_2, cal32_1, cal16_400 };
  */
 class INA219 : public Sensor {
  public:
-  INA219(uint8_t addr = 0x40, INA219CAL_t calibration_setting = cal32_2);
+  INA219(uint8_t addr = 0x40,
+      INA219_BusVoltage range = INA219_CONFIG_BVOLTAGERANGE_16V,
+      INA219_ShuntGain gain = INA219_CONFIG_GAIN_1_40MV,
+      uint max_current_ma = 400, uint shunt_uohms = 100000, String config_path = "");
   Adafruit_INA219* ada_ina219_;
+  virtual void get_configuration(JsonObject& doc) override;
+  virtual bool set_configuration(const JsonObject& config) override;
+  virtual String get_config_schema() override;
+
+private:
+  INA219_BusVoltage range_;
+  INA219_ShuntGain gain_;
+  uint max_current_ma_;
+  uint shunt_uohms_;
 };
 
 
